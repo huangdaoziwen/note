@@ -1,0 +1,181 @@
+<?php
+namespace App\Services\BaseClass;
+
+use Facades\Tcms\ApiRpc\ClientFactory as Rpc;
+
+class ImageService
+{
+    const IMAGE_MULTI_UPLOAD_URL  = 'http://img.cms.webdev.com/interface/image/imageMultiUpload.php';
+    const IMAGE_CUSTOM_UPLOAD_URL = 'http://img.cms.webdev.com/interface/image/imageMultiUpload4Content.php';
+
+    const DEFAULT_ORG_FORMAT = 1;
+    const DEFAULT_APP_KEY = 2;
+    const IS_RET_IMG_ATTR = 1;
+
+    const IS_PICTURE3_UPLOAD = true;
+
+    /**
+     * @param $file
+     * @param array $params [
+     *          'fileName','opCode','orgFormat','appkey','orgFormat','isUpOrg'
+     *      ]
+     * @return mixed
+     * @throws \Exception
+     */
+    public function multiUpload($file, $params=[]){
+        $content_type = $_SERVER['CONTENT_TYPE'];
+        if (strpos($content_type, 'multipart/form-data') === false){
+            throw new \LogicException('invalid content type', 400);
+        }
+        $params['orgFormat'] = $params['orgFormat'] ?? self::DEFAULT_ORG_FORMAT;
+        $params['appkey'] = $params['appkey'] ?? self::DEFAULT_APP_KEY;
+        $params['Filedata'] = $file['Filedata']['tmp_name'];
+        $result = $this->curlUpload(self::IMAGE_MULTI_UPLOAD_URL, $params);
+        return $result;
+    }
+
+    public function picture3MultiUpload($postData, $params = [])
+    {
+        $params['opCode'] = $postData['opCode'];
+        $params['pics3'] = self::IS_PICTURE3_UPLOAD;
+        $params['url'] = $postData['url'];
+        $result = $this->curlUpload(self::IMAGE_MULTI_UPLOAD_URL, $params);
+        return $result;
+    }
+
+    /**
+     * @param $file
+     * @param array $params [
+     *          'fileName','size','orgFormat','appkey','orgFormat','isUpOrg'
+     *      ]
+     * @return mixed
+     * @throws \Exception
+     */
+    public function customUpload($file, $params=[]){
+        $content_type = $_SERVER['CONTENT_TYPE'];
+        if (strpos($content_type, 'multipart/form-data') === false){
+            throw new \LogicException('invalid content type', 400);
+        }
+        $params['orgFormat'] = $params['orgFormat'] ?? self::DEFAULT_ORG_FORMAT;
+        $params['appkey'] = $params['appkey'] ?? self::DEFAULT_APP_KEY;
+        $params['Filedata'] = $file['Filedata']['tmp_name'];
+        $postData = $params;
+        $size = [];
+        if(isset($postData['width'])){
+            $size['width'] = $postData['width'];
+        }
+        if(isset($postData['height'])){
+            $size['height'] = $postData['height'];
+        }
+        if($size) {
+            $postData['size'] = json_encode($size);
+        }
+        $result = $this->curlUpload(self::IMAGE_CUSTOM_UPLOAD_URL, $postData);
+        return $result;
+    }
+
+    /**
+     * 上传图片
+     * @param $url
+     * @param array $params
+     * @return mixed
+     */
+    public function upload($url, $params = []){
+        $rpcConfig = [
+            'name' => 'upload image',
+            'uri' => $url,
+            'message_field' => 'response.msg',
+            'code_field' => 'response.code',
+            'target_field' => 'data'
+        ];
+        $client = Rpc::make($rpcConfig);
+        $data = $client->send($params);
+        return $data;
+    }
+
+    /**
+     * 解析多图上传数据结构
+     * @param $data
+     * @return array
+     */
+    public function parseBatchCustomUploadData($data){
+        $newData = [];
+        foreach($data as $url => $item) {
+            if($item["type"] == 1) {
+                $newData[$url] = $item["size"]["0"]["imgurl"];
+
+            } else {
+                $newData[$url] = $item["size"]["641"]["imgurl"];
+            }
+        }
+
+        return $newData;
+    }
+
+    /**
+     * 解析图片上传参数
+     * @param $postData
+     * @return array
+     */
+    private function parseParams($postData){
+        if(!is_array($postData))
+            return [];
+
+        $newParams = [];
+        foreach($postData as $key => $val) {
+            if($key == "Filedata") {
+                $newParams[] = [
+                    "name" => $key,
+                    "contents" =>fopen($val->name, 'r')
+                ];
+            } else {
+                $newParams[] = [
+                    "name" => $key,
+                    "contents" => $val,
+                ];
+            }
+        }
+        return $newParams;
+    }
+
+    private function curlUpload($url, $postData, $method="post"){
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_HEADER, false);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        if (!isset($postData['pics3'])) {
+            $postData['Filedata'] = new \CURLFile($postData["Filedata"]);
+        } else {
+            unset($postData['pics']);
+        }
+        //获取三图给的是图片url，绕过这一步
+        //$postData['Filedata'] = new \CURLFile($postData["Filedata"]);
+        ////PHP 7 版本不能在文件名前面加@符号来标记上传文件，需要使用CURLFile函数，并且和CURLOPT_POSTFIELDS是一起使用的
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
+        $ret = curl_exec($ch);
+        if ($ret === false){
+            throw new \Exception(curl_error($ch), curl_errno($ch));
+        }
+        return $ret;
+    }
+    /*
+    private function picsUrlUpload($url, $postData, $method="post"){
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_HEADER, false);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        if (!isset($postData['pics'])) {
+            $postData['Filedata'] = new \CURLFile($postData["Filedata"]);
+        } else {
+            unset($postData['pics']);
+        }
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
+        $ret = curl_exec($ch);
+        if ($ret === false){
+            throw new \Exception(curl_error($ch), curl_errno($ch));
+        }
+        return $ret;
+    }
+    */
+
+}
